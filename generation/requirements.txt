@@ -1,0 +1,22 @@
+# Core
+torch>=2.1.0
+torchvision>=0.16.0
+Pillow>=10.0.0
+tqdm>=4.65.0
+numpy>=1.24.0
+
+# Diffusion models (SD v1.5, SDXL) + VLMs (LLaVA, InstructBLIP)
+diffusers>=0.27.0
+transformers>=4.38.0
+accelerate>=0.27.0
+peft>=0.9.0
+safetensors>=0.4.0
+sentencepiece>=0.1.99
+
+# HuggingFace hub (model downloads)
+huggingface-hub>=0.21.0
+
+# Note: StyleGAN2-ADA and ProjectedGAN clone their own repos and manage
+# their own dependencies (ninja, etc.) when you run:
+#   python stylegan2/train_stylegan2.py   (clones NVlabs/stylegan2-ada-pytorch)
+#   python projected_gan/train_projected_gan.py  (clones autonomousvision/projected_gan)

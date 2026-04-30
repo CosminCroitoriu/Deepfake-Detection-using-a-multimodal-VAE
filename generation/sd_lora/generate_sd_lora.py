@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+Generate fake disaster images using a fine-tuned SD v1.5 + LoRA adapter.
+
+Input:  ../checkpoints/sd_lora/final/  (peft adapter weights)
+Output: ../data/fake/sd_lora/<class>/   (PNG images)
+"""
+import argparse
+from pathlib import Path
+
+import torch
+from diffusers import StableDiffusionPipeline
+from diffusers.models import UNet2DConditionModel
+from peft import PeftModel
+from tqdm import tqdm
+
+MODEL_ID = "runwayml/stable-diffusion-v1-5"
+
+DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
+
+PROMPTS = {
+    "earthquake": [
+        "a photograph of earthquake damage, collapsed concrete buildings and rubble in the streets",
+        "aerial view of earthquake devastation, destroyed structures and debris fields",
+        "a disaster photograph of earthquake aftermath, crumbled walls and displaced people",
+    ],
+    "fire": [
+        "a photograph of a wildfire raging through a residential neighborhood with flames and smoke",
+        "a disaster photograph of a building fire with thick black smoke and emergency response",
+        "aerial view of a wildfire consuming a forest, orange flames and smoke plumes",
+    ],
+    "flood": [
+        "a photograph of severe urban flooding with cars and buildings submerged in water",
+        "a disaster photograph of a flooded street with rescue boats and displaced residents",
+        "aerial view of floodwaters inundating a town, brown water covering roads and fields",
+    ],
+    "hurricane": [
+        "a photograph of hurricane damage with uprooted trees and destroyed buildings",
+        "a disaster photograph of hurricane aftermath, collapsed roofs and scattered debris",
+        "aerial view of hurricane destruction, widespread structural damage and flooding",
+    ],
+    "landslide": [
+        "a photograph of a landslide with mud and rocks covering a mountain road",
+        "a disaster photograph of a mudslide destroying homes in a hillside community",
+        "aerial view of a massive landslide, mud flow burying structures and roads",
+    ],
+}
+
+
+def load_pipeline(model_id: str, adapter_path: Path, device: torch.device):
+    print(f"Loading base model {model_id} ...")
+    base_unet = UNet2DConditionModel.from_pretrained(
+        model_id, subfolder="unet", torch_dtype=torch.float16
+    )
+    unet = PeftModel.from_pretrained(base_unet, str(adapter_path))
+    unet = unet.merge_and_unload()  # bake LoRA into weights for faster inference
+
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id, unet=unet, torch_dtype=torch.float16, safety_checker=None
+    )
+    pipe = pipe.to(device)
+    pipe.set_progress_bar_config(disable=True)
+    return pipe
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--data_dir", default="../data")
+    parser.add_argument("--adapter_path", default="../checkpoints/sd_lora/final")
+    parser.add_argument("--model_id", default=MODEL_ID)
+    parser.add_argument("--n_images", type=int, default=500,
+                        help="Images to generate per class (default: 500)")
+    parser.add_argument("--steps", type=int, default=30)
+    parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
+                        choices=DISASTER_CLASSES)
+    args = parser.parse_args()
+
+    adapter_path = Path(args.adapter_path)
+    if not adapter_path.exists():
+        print(f"ERROR: adapter not found at {adapter_path}")
+        print("Run train_sd_lora.py first.")
+        return 1
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pipe = load_pipeline(args.model_id, adapter_path, device)
+
+    out_root = Path(args.data_dir) / "fake" / "sd_lora"
+
+    for cls in args.classes:
+        out_dir = out_root / cls
+        out_dir.mkdir(parents=True, exist_ok=True)
+        prompts = PROMPTS[cls]
+        print(f"\n[{cls}] generating {args.n_images} images ...")
+
+        for i in tqdm(range(args.n_images)):
+            prompt = prompts[i % len(prompts)]
+            with torch.inference_mode():
+                image = pipe(
+                    prompt,
+                    num_inference_steps=args.steps,
+                    guidance_scale=args.guidance_scale,
+                    height=256,
+                    width=256,
+                ).images[0]
+            image.save(out_dir / f"{i:05d}.png")
+
+        print(f"  Saved {args.n_images} images -> {out_dir}")
+
+    print("\nSD v1.5 LoRA generation complete.")
+
+
+if __name__ == "__main__":
+    main()
