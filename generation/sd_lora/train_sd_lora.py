@@ -2,15 +2,17 @@
 """
 Fine-tune Stable Diffusion v1.5 with LoRA on CrisisNLP disaster images.
 
-Trains unconditionally (empty prompts) — the LoRA adapter learns the
-CrisisNLP image distribution without any text conditioning.
-Requires ~14 GB VRAM with fp16 + gradient checkpointing.
+Each image is conditioned on its class-level prompt (e.g. "a photograph of
+a flood disaster") so training and inference use the same text conditioning.
+
+Targets A100/H100/H200 cluster nodes (40-141 GB VRAM).
+Default batch size 32 fits comfortably on a single A100 40GB.
 
 Run data_prep/preprocess.py first (needs ../data/real_256/).
 
 Usage:
   python train_sd_lora.py
-  python train_sd_lora.py --epochs 10 --batch_size 8
+  python train_sd_lora.py --epochs 10 --batch_size 64
 """
 import argparse
 from pathlib import Path
@@ -29,6 +31,14 @@ MODEL_ID = "runwayml/stable-diffusion-v1-5"
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 
+CLASS_PROMPTS = {
+    "earthquake": "a photograph of earthquake damage",
+    "fire":       "a photograph of a wildfire disaster",
+    "flood":      "a photograph of a flood disaster",
+    "hurricane":  "a photograph of hurricane damage",
+    "landslide":  "a photograph of a landslide disaster",
+}
+
 
 class CrisisDataset(Dataset):
     def __init__(self, data_root: Path, size: int = 512):
@@ -40,15 +50,18 @@ class CrisisDataset(Dataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
-        self.paths = []
+        self.samples = []  # (path, prompt)
         for cls in DISASTER_CLASSES:
-            self.paths.extend((data_root / cls).glob("*.png"))
+            prompt = CLASS_PROMPTS[cls]
+            for p in (data_root / cls).glob("*.png"):
+                self.samples.append((p, prompt))
 
     def __len__(self):
-        return len(self.paths)
+        return len(self.samples)
 
     def __getitem__(self, idx):
-        return self.transform(Image.open(self.paths[idx]).convert("RGB"))
+        path, prompt = self.samples[idx]
+        return self.transform(Image.open(path).convert("RGB")), prompt
 
 
 def main():
@@ -59,12 +72,14 @@ def main():
     parser.add_argument("--output_dir", default="../checkpoints/sd_lora")
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--resolution", type=int, default=512)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lora_rank", type=int, default=16)
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--save_every", type=int, default=1)
+    parser.add_argument("--gradient_checkpointing", action="store_true",
+                        help="Enable gradient checkpointing (only needed on low-VRAM GPUs)")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -84,15 +99,18 @@ def main():
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
-    unet.enable_gradient_checkpointing()
+    if args.gradient_checkpointing:
+        unet.enable_gradient_checkpointing()
 
-    # Precompute the empty-prompt embedding once — used for every batch
+    # Precompute one embedding per class — reused each batch
     with torch.no_grad():
-        empty_ids = tokenizer(
-            "", padding="max_length", max_length=tokenizer.model_max_length,
-            truncation=True, return_tensors="pt",
-        ).input_ids.to(device)
-        empty_embeds = text_encoder(empty_ids)[0]  # (1, seq_len, 768)
+        class_embeds = {}
+        for cls, prompt in CLASS_PROMPTS.items():
+            ids = tokenizer(
+                prompt, padding="max_length", max_length=tokenizer.model_max_length,
+                truncation=True, return_tensors="pt",
+            ).input_ids.to(device)
+            class_embeds[cls] = text_encoder(ids)[0]  # (1, seq_len, 768)
 
     lora_config = LoraConfig(
         r=args.lora_rank,
@@ -106,7 +124,11 @@ def main():
 
     dataset = CrisisDataset(Path(args.data_dir) / "real_256", args.resolution)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
-                        num_workers=4, drop_last=True, pin_memory=True)
+                        num_workers=4, drop_last=True, pin_memory=True,
+                        collate_fn=lambda b: (
+                            torch.stack([x[0] for x in b]),
+                            [x[1] for x in b],
+                        ))
     print(f"Dataset: {len(dataset)} images, {len(loader)} batches/epoch")
 
     optimizer = torch.optim.AdamW(unet.parameters(), lr=args.lr, weight_decay=1e-2)
@@ -123,7 +145,7 @@ def main():
         total_loss = 0.0
         pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{args.epochs}")
 
-        for pixel_values in pbar:
+        for pixel_values, prompts in pbar:
             pixel_values = pixel_values.to(device, dtype=torch.float16)
             bsz = pixel_values.shape[0]
 
@@ -136,7 +158,11 @@ def main():
                 0, noise_scheduler.config.num_train_timesteps, (bsz,), device=device
             ).long()
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-            encoder_hidden = empty_embeds.expand(bsz, -1, -1)
+
+            # Look up precomputed embedding for each prompt in the batch
+            encoder_hidden = torch.cat(
+                [class_embeds[p] for p in prompts], dim=0
+            )
 
             with torch.cuda.amp.autocast():
                 noise_pred = unet(noisy_latents, timesteps, encoder_hidden).sample

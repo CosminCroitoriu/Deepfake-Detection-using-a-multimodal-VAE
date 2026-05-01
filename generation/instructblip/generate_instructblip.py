@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate fake disaster images using InstructBLIP-Vicuna-7B + Stable Diffusion XL.
+Generate fake disaster images using InstructBLIP-Vicuna-7B + Stable Diffusion v1.5.
 
 Pipeline per image:
   1. InstructBLIP analyzes a real CrisisNLP image and produces a detailed scene description.
-  2. SDXL (base, no LoRA) generates a new fake image from that description.
+  2. SD v1.5 (base, no LoRA) generates a new fake image from that description.
 
 Models are loaded and unloaded sequentially to avoid holding both in VRAM at once.
 
@@ -20,10 +20,10 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration
-from diffusers import StableDiffusionXLPipeline
+from diffusers import StableDiffusionPipeline
 
 INSTRUCTBLIP_MODEL_ID = "Salesforce/instructblip-vicuna-7b"
-SDXL_MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
+SD_MODEL_ID = "runwayml/stable-diffusion-v1-5"
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 
@@ -74,10 +74,10 @@ def unload(model):
     torch.cuda.empty_cache()
 
 
-def load_sdxl(device: torch.device):
-    print(f"Loading {SDXL_MODEL_ID} ...")
-    pipe = StableDiffusionXLPipeline.from_pretrained(
-        SDXL_MODEL_ID, torch_dtype=torch.float16
+def load_sd(device: torch.device):
+    print(f"Loading {SD_MODEL_ID} ...")
+    pipe = StableDiffusionPipeline.from_pretrained(
+        SD_MODEL_ID, torch_dtype=torch.float16, safety_checker=None
     )
     pipe = pipe.to(device)
     pipe.set_progress_bar_config(disable=True)
@@ -86,16 +86,15 @@ def load_sdxl(device: torch.device):
 
 def generate_images(pipe, descriptions: list, out_dir: Path, steps: int, guidance: float):
     out_dir.mkdir(parents=True, exist_ok=True)
-    for i, desc in enumerate(tqdm(descriptions, desc=f"  SDXL [{out_dir.name}]")):
+    for i, desc in enumerate(tqdm(descriptions, desc=f"  SD [{out_dir.name}]")):
         with torch.inference_mode():
             image = pipe(
                 desc,
                 num_inference_steps=steps,
                 guidance_scale=guidance,
-                height=1024,
-                width=1024,
+                height=256,
+                width=256,
             ).images[0]
-        image = image.resize((256, 256), Image.LANCZOS)
         image.save(out_dir / f"{i:05d}.png")
 
 
@@ -138,15 +137,15 @@ def main():
     unload(iblip)
     del processor
 
-    # --- Phase 2: generate images with SDXL ---
-    pipe = load_sdxl(device)
+    # --- Phase 2: generate images with SD v1.5 ---
+    pipe = load_sd(device)
 
     for cls, descs in all_descriptions.items():
         out_dir = out_root / cls
         generate_images(pipe, descs, out_dir, args.steps, args.guidance_scale)
         print(f"  {cls}: {len(descs)} images saved -> {out_dir}")
 
-    print("\nInstructBLIP + SDXL generation complete.")
+    print("\nInstructBLIP + SD generation complete.")
 
 
 if __name__ == "__main__":
