@@ -2,19 +2,27 @@
 """
 Fine-tune Stable Diffusion v1.5 with LoRA on CrisisNLP disaster images.
 
-Each image is conditioned on its class-level prompt (e.g. "a photograph of
-a flood disaster") so training and inference use the same text conditioning.
+Each image is conditioned on its VLM-generated caption (from generate_captions.py).
+Falls back to a generic class-level prompt for any image without a caption.
+
+Training uses images from all tasks:
+  - real_256/<class>/       Task 1 (disaster types, 5 classes)
+  - real_extra_256/         Tasks 2/3/4 (extra disaster images)
 
 Targets A100/H100/H200 cluster nodes (40-141 GB VRAM).
 Default batch size 32 fits comfortably on a single A100 40GB.
 
-Run data_prep/preprocess.py first (needs ../data/real_256/).
+Prerequisites:
+  Run data_prep/prepare_dataset.py
+  Run data_prep/preprocess.py --include_extra
+  Run data_prep/generate_captions.py
 
 Usage:
   python train_sd_lora.py
   python train_sd_lora.py --epochs 10 --batch_size 64
 """
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -39,9 +47,11 @@ CLASS_PROMPTS = {
     "landslide":  "a photograph of a landslide disaster",
 }
 
+FALLBACK_PROMPT = "a photograph of a natural disaster"
+
 
 class CrisisDataset(Dataset):
-    def __init__(self, data_root: Path, size: int = 512):
+    def __init__(self, data_dir: Path, captions: dict[str, str], size: int = 512):
         self.transform = transforms.Compose(
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
@@ -50,18 +60,35 @@ class CrisisDataset(Dataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
-        self.samples = []  # (path, prompt)
+        self.samples = []  # (path, caption)
+        missing = 0
+
+        # Task 1: per-class images
         for cls in DISASTER_CLASSES:
-            prompt = CLASS_PROMPTS[cls]
-            for p in (data_root / cls).glob("*.png"):
-                self.samples.append((p, prompt))
+            fallback = CLASS_PROMPTS[cls]
+            for p in sorted((data_dir / "real_256" / cls).glob("*.png")):
+                rel = f"real_256/{cls}/{p.name}"
+                self.samples.append((p, captions.get(rel, fallback)))
+                if rel not in captions:
+                    missing += 1
+
+        # Tasks 2/3/4: extra images — only include if a caption exists
+        extra_dir = data_dir / "real_extra_256"
+        if extra_dir.exists():
+            for p in sorted(extra_dir.glob("*.png")):
+                rel = f"real_extra_256/{p.name}"
+                if rel in captions:
+                    self.samples.append((p, captions[rel]))
+
+        if missing:
+            print(f"  WARNING: {missing} Task-1 images have no caption, using class fallback")
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        path, prompt = self.samples[idx]
-        return self.transform(Image.open(path).convert("RGB")), prompt
+        path, caption = self.samples[idx]
+        return self.transform(Image.open(path).convert("RGB")), caption
 
 
 def main():
@@ -69,6 +96,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data_dir", default="../data")
+    parser.add_argument("--captions_file", default="../data/captions.json")
     parser.add_argument("--output_dir", default="../checkpoints/sd_lora")
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--resolution", type=int, default=512)
@@ -78,13 +106,20 @@ def main():
     parser.add_argument("--lora_rank", type=int, default=16)
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--save_every", type=int, default=1)
-    parser.add_argument("--gradient_checkpointing", action="store_true",
-                        help="Enable gradient checkpointing (only needed on low-VRAM GPUs)")
+    parser.add_argument("--gradient_checkpointing", action="store_true")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    captions_path = Path(args.captions_file)
+    if captions_path.exists():
+        captions = json.loads(captions_path.read_text())
+        print(f"Loaded {len(captions):,} captions from {captions_path}")
+    else:
+        print(f"WARNING: {captions_path} not found — falling back to class prompts for all images")
+        captions = {}
 
     print(f"Loading {args.model_id} ...")
     pipe = StableDiffusionPipeline.from_pretrained(
@@ -102,16 +137,6 @@ def main():
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
 
-    # Precompute one embedding per class — reused each batch
-    with torch.no_grad():
-        class_embeds = {}
-        for cls, prompt in CLASS_PROMPTS.items():
-            ids = tokenizer(
-                prompt, padding="max_length", max_length=tokenizer.model_max_length,
-                truncation=True, return_tensors="pt",
-            ).input_ids.to(device)
-            class_embeds[cls] = text_encoder(ids)[0]  # (1, seq_len, 768)
-
     lora_config = LoraConfig(
         r=args.lora_rank,
         lora_alpha=args.lora_alpha,
@@ -122,13 +147,12 @@ def main():
     unet = get_peft_model(unet, lora_config)
     unet.print_trainable_parameters()
 
-    dataset = CrisisDataset(Path(args.data_dir) / "real_256", args.resolution)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
-                        num_workers=4, drop_last=True, pin_memory=True,
-                        collate_fn=lambda b: (
-                            torch.stack([x[0] for x in b]),
-                            [x[1] for x in b],
-                        ))
+    dataset = CrisisDataset(Path(args.data_dir), captions, args.resolution)
+    loader = DataLoader(
+        dataset, batch_size=args.batch_size, shuffle=True,
+        num_workers=4, drop_last=True, pin_memory=True,
+        collate_fn=lambda b: (torch.stack([x[0] for x in b]), [x[1] for x in b]),
+    )
     print(f"Dataset: {len(dataset)} images, {len(loader)} batches/epoch")
 
     optimizer = torch.optim.AdamW(unet.parameters(), lr=args.lr, weight_decay=1e-2)
@@ -153,16 +177,18 @@ def main():
                 latents = vae.encode(pixel_values).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
+                ids = tokenizer(
+                    prompts, padding="max_length",
+                    max_length=tokenizer.model_max_length,
+                    truncation=True, return_tensors="pt",
+                ).input_ids.to(device)
+                encoder_hidden = text_encoder(ids)[0]
+
             noise = torch.randn_like(latents)
             timesteps = torch.randint(
                 0, noise_scheduler.config.num_train_timesteps, (bsz,), device=device
             ).long()
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-
-            # Look up precomputed embedding for each prompt in the batch
-            encoder_hidden = torch.cat(
-                [class_embeds[p] for p in prompts], dim=0
-            )
 
             with torch.cuda.amp.autocast():
                 noise_pred = unet(noisy_latents, timesteps, encoder_hidden).sample

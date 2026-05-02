@@ -3,8 +3,10 @@
 Preprocess CrisisNLP real images: center-crop to square, resize to 256x256,
 save as PNG.
 
-Input:  ../data/real/<class>/
-Output: ../data/real_256/<class>/
+Run prepare_dataset.py first.
+
+Input:  ../data/real/<class>/   → ../data/real_256/<class>/
+        ../data/real_extra/     → ../data/real_extra_256/   (--include_extra)
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,9 +15,8 @@ from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
 
-ALL_CLASSES = [
+DISASTER_CLASSES = [
     "earthquake", "fire", "flood", "hurricane", "landslide",
-    "not_disaster", "other_disaster",
 ]
 
 
@@ -39,6 +40,25 @@ def process_one(src: Path, dst: Path, size: int) -> bool:
         return False
 
 
+def process_dir(src_dir: Path, dst_dir: Path, size: int, workers: int, label: str) -> int:
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    tasks = [
+        (p, dst_dir / (p.stem + ".png"))
+        for p in src_dir.iterdir()
+        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    ]
+    if not tasks:
+        return 0
+
+    ok = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(process_one, src, dst, size): None for src, dst in tasks}
+        for fut in tqdm(as_completed(futures), total=len(futures), desc=label, leave=False):
+            if fut.result():
+                ok += 1
+    return ok
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -46,44 +66,41 @@ def main():
     parser.add_argument("--data_dir", default="../data")
     parser.add_argument("--size", type=int, default=256)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument(
+        "--include_extra", action="store_true",
+        help="Also process real_extra/ -> real_extra_256/ (Tasks 2 & 3 images for VAE training)",
+    )
     args = parser.parse_args()
 
-    src_root = Path(args.data_dir) / "real"
-    dst_root = Path(args.data_dir) / "real_256"
-    dst_root.mkdir(parents=True, exist_ok=True)
+    data_dir = Path(args.data_dir)
+    total_ok = 0
 
-    tasks = []
-    for cls in ALL_CLASSES:
+    # Task 1: per-class disaster images
+    src_root = data_dir / "real"
+    dst_root = data_dir / "real_256"
+    print(f"Processing disaster class images ...")
+    for cls in DISASTER_CLASSES:
         src_cls = src_root / cls
         if not src_cls.exists():
-            print(f"WARNING: {src_cls} not found, skipping")
+            print(f"  WARNING: {src_cls} not found, skipping")
             continue
-        dst_cls = dst_root / cls
-        dst_cls.mkdir(parents=True, exist_ok=True)
-        for img_path in src_cls.iterdir():
-            if img_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
-                dst_path = dst_cls / (img_path.stem + ".png")
-                tasks.append((img_path, dst_path, cls))
+        n = process_dir(src_cls, dst_root / cls, args.size, args.workers, cls)
+        total_ok += n
+        print(f"  {cls}: {n}")
 
-    print(f"Processing {len(tasks)} images with {args.workers} workers ...")
-    ok = 0
+    # Tasks 2 & 3: extra images for VAE training (unlabeled)
+    if args.include_extra:
+        src_extra = data_dir / "real_extra"
+        dst_extra = data_dir / "real_extra_256"
+        if src_extra.exists():
+            print(f"\nProcessing extra images (Tasks 2 & 3) ...")
+            n = process_dir(src_extra, dst_extra, args.size, args.workers, "real_extra")
+            total_ok += n
+            print(f"  real_extra: {n}")
+        else:
+            print(f"\nWARNING: {src_extra} not found — run prepare_dataset.py first")
 
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futures = {
-            ex.submit(process_one, src, dst, args.size): (src, dst, cls)
-            for src, dst, cls in tasks
-        }
-        for fut in tqdm(as_completed(futures), total=len(futures)):
-            src, dst, cls = futures[fut]
-            if fut.result():
-                ok += 1
-
-    print(f"\nSaved {ok}/{len(tasks)} images to {dst_root}")
-    print("\nCounts per class:")
-    for cls in ALL_CLASSES:
-        n = len(list((dst_root / cls).glob("*.png"))) if (dst_root / cls).exists() else 0
-        if n:
-            print(f"  {cls}: {n}")
+    print(f"\nTotal: {total_ok} images processed -> {dst_root}")
 
 
 if __name__ == "__main__":

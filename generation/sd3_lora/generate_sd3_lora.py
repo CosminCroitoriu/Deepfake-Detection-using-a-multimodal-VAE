@@ -2,9 +2,8 @@
 """
 Generate fake disaster images using SD3-medium + LoRA adapter.
 
-Loads the SD3-medium base model, merges the LoRA adapter trained by
-train_sd3_lora.py, and generates images using detailed class-specific prompts
-(3 prompts per class, cycled to produce variety across the output set).
+Prompts are sampled from the VLM-generated captions (data/captions.json).
+Falls back to hardcoded class-level prompts if captions are unavailable.
 
 Images are generated at 512×512 and downsampled to 256×256 to match the
 CrisisNLP dataset resolution.
@@ -15,9 +14,12 @@ Prerequisites:
   Run: train_sd3_lora.py first to produce a LoRA adapter.
 
 Input:  ../checkpoints/sd3_lora/final  (LoRA adapter)
+        ../data/captions.json          (VLM captions, optional)
 Output: ../data/fake/sd3_lora/<class>/
 """
 import argparse
+import json
+import random
 from pathlib import Path
 
 import torch
@@ -30,7 +32,7 @@ MODEL_ID = "stabilityai/stable-diffusion-3-medium-diffusers"
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 
-PROMPTS = {
+FALLBACK_PROMPTS = {
     "earthquake": [
         "a photo of severe earthquake damage, collapsed concrete buildings, "
         "rubble-filled streets, dust clouds, realistic documentary photography",
@@ -74,11 +76,26 @@ PROMPTS = {
 }
 
 
+def load_class_captions(captions_path: Path) -> dict[str, list[str]]:
+    """Return {class: [caption, ...]} built from captions.json Task-1 entries."""
+    if not captions_path.exists():
+        return {}
+    all_captions = json.loads(captions_path.read_text())
+    class_caps: dict[str, list[str]] = {cls: [] for cls in DISASTER_CLASSES}
+    for rel_key, caption in all_captions.items():
+        for cls in DISASTER_CLASSES:
+            if rel_key.startswith(f"real_256/{cls}/"):
+                class_caps[cls].append(caption)
+                break
+    return class_caps
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data_dir", default="../data")
+    parser.add_argument("--captions_file", default="../data/captions.json")
     parser.add_argument("--lora_dir", default="../checkpoints/sd3_lora/final")
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--n_images", type=int, default=500)
@@ -88,9 +105,13 @@ def main():
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--output_size", type=int, default=256,
                         help="Resize generated images to this square size (default: 256)")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
                         choices=DISASTER_CLASSES)
     args = parser.parse_args()
+
+    class_captions = load_class_captions(Path(args.captions_file))
+    rng = random.Random(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -111,11 +132,14 @@ def main():
     for cls in args.classes:
         out_dir = out_root / cls
         out_dir.mkdir(parents=True, exist_ok=True)
-        prompts = PROMPTS[cls]
-        print(f"\n[{cls}] generating {args.n_images} images ...")
+        pool = class_captions.get(cls) or FALLBACK_PROMPTS[cls]
+        if class_captions.get(cls):
+            print(f"\n[{cls}] generating {args.n_images} images (sampling from {len(pool)} VLM captions) ...")
+        else:
+            print(f"\n[{cls}] generating {args.n_images} images (no captions found, using fallback prompts) ...")
 
         for i in tqdm(range(args.n_images)):
-            prompt = prompts[i % len(prompts)]
+            prompt = rng.choice(pool)
             with torch.inference_mode():
                 image = pipe(
                     prompt,
