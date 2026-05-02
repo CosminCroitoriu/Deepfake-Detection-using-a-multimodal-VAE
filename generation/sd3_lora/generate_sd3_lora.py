@@ -32,6 +32,8 @@ MODEL_ID = "stabilityai/stable-diffusion-3-medium-diffusers"
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 
+CAPTION_PREFIX = "A social media photograph of a disaster scene. "
+
 FALLBACK_PROMPTS = {
     "earthquake": [
         "a photo of severe earthquake damage, collapsed concrete buildings, "
@@ -138,8 +140,11 @@ def main():
         else:
             print(f"\n[{cls}] generating {args.n_images} images (no captions found, using fallback prompts) ...")
 
+        using_vlm = bool(class_captions.get(cls))
         for i in tqdm(range(args.n_images)):
             prompt = rng.choice(pool)
+            if using_vlm:
+                prompt = CAPTION_PREFIX + prompt
             with torch.inference_mode():
                 image = pipe(
                     prompt,
