@@ -172,6 +172,10 @@ def main():
         "--resume", action="store_true",
         help="Skip images already present in the output JSON",
     )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Process at most N images (for testing)",
+    )
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -196,6 +200,10 @@ def main():
     if args.resume:
         images = [(p, k, gt) for p, k, gt in images if k not in captions]
         print(f"  {len(images):,} remaining")
+
+    if args.limit:
+        images = images[: args.limit]
+        print(f"  Limiting to {len(images)} images (--limit)")
 
     if not images:
         print("Nothing to do.")
