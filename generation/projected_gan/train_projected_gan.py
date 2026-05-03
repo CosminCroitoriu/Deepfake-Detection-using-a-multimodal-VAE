@@ -68,6 +68,7 @@ def train(
     gpus: int,
     batch: int,
     kimg: int,
+    resume: str | None = None,
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -81,6 +82,8 @@ def train(
         "--snap", "50",
         "--mirror", "1",
     ]
+    if resume:
+        cmd += ["--resume", resume]
     print("\nLaunching ProjectedGAN training ...")
     print("  " + " ".join(cmd))
     subprocess.run(cmd, check=True)
@@ -98,6 +101,8 @@ def main():
     parser.add_argument("--kimg", type=int, default=5000)
     parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
                         choices=DISASTER_CLASSES)
+    parser.add_argument("--resume", default=None,
+                        help="Path to a .pkl snapshot to resume from")
     args = parser.parse_args()
 
     repo_dir = Path(args.repo_dir)
@@ -115,7 +120,7 @@ def main():
     make_dataset_zip(merged_dir, zip_path, repo_dir)
 
     out_dir = ckpt_root / "training_runs"
-    train(zip_path, out_dir, repo_dir, args.gpus, args.batch, args.kimg)
+    train(zip_path, out_dir, repo_dir, args.gpus, args.batch, args.kimg, args.resume)
 
     print(f"\nProjectedGAN training complete. Checkpoints in {out_dir}")
     print("Next: run generate_projected_gan.py")
