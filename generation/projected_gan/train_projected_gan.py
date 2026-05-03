@@ -21,6 +21,9 @@ from pathlib import Path
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 REPO_URL = "https://github.com/autonomousvision/projected_gan.git"
 
+# Paths are anchored to the script's location so the script works regardless of CWD.
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 
 def clone_repo(repo_dir: Path):
     if repo_dir.exists():
@@ -28,6 +31,35 @@ def clone_repo(repo_dir: Path):
         return
     print(f"Cloning ProjectedGAN into {repo_dir} ...")
     subprocess.run(["git", "clone", REPO_URL, str(repo_dir)], check=True)
+
+
+def apply_patches(repo_dir: Path):
+    """Apply compatibility patches for Python 3.12 / PyTorch 2.x / timm 0.6+."""
+    # Patch 1: misc.py — PyTorch ≥1.11 removed the dataset arg from Sampler.__init__
+    misc_path = repo_dir / "torch_utils" / "misc.py"
+    text = misc_path.read_text()
+    if "super().__init__(dataset)" in text:
+        misc_path.write_text(text.replace("super().__init__(dataset)", "super().__init__()"))
+        print("  Patched torch_utils/misc.py")
+
+    # Patch 2: projector.py — timm ≥0.6 dropped act1 as standalone attribute on EfficientNet
+    proj_path = repo_dir / "pg_modules" / "projector.py"
+    text = proj_path.read_text()
+    if "model.act1" in text and "hasattr(model, 'act1')" not in text:
+        text = text.replace(
+            "act1 = model.act1",
+            "act1 = model.act1 if hasattr(model, 'act1') else torch.nn.SiLU()",
+        )
+        proj_path.write_text(text)
+        print("  Patched pg_modules/projector.py")
+
+    # Patch 3: train.py — PyTorch ≥2.0 rejects mixed int/float betas in Adam
+    train_path = repo_dir / "train.py"
+    text = train_path.read_text()
+    patched = text.replace("betas=[0,", "betas=[0.0,")
+    if patched != text:
+        train_path.write_text(patched)
+        print("  Patched train.py (betas)")
 
 
 def merge_classes(data_root: Path, merged_dir: Path, classes: list) -> int:
@@ -75,7 +107,7 @@ def train(
         sys.executable, str(repo_dir / "train.py"),
         "--outdir", str(out_dir),
         "--data", str(dataset_zip),
-        "--cfg", "fastgan",        # best config for < 100K images
+        "--cfg", "fastgan",
         "--gpus", str(gpus),
         "--batch", str(batch),
         "--kimg", str(kimg),
@@ -93,9 +125,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--repo_dir", default="./projected_gan")
-    parser.add_argument("--checkpoints_dir", default="../checkpoints/projected_gan")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--repo_dir", default=str(SCRIPT_DIR / "projected_gan"))
+    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan"))
     parser.add_argument("--gpus", type=int, default=1)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--kimg", type=int, default=5000)
@@ -110,6 +142,7 @@ def main():
     ckpt_root = Path(args.checkpoints_dir)
 
     clone_repo(repo_dir)
+    apply_patches(repo_dir)
 
     merged_dir = ckpt_root / "merged_dataset"
     print("Merging class folders ...")
