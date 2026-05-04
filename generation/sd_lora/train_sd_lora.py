@@ -29,7 +29,7 @@ import torch
 import torch.nn.functional as F
 from diffusers import DDPMScheduler, StableDiffusionPipeline
 from diffusers.optimization import get_scheduler
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
@@ -48,6 +48,8 @@ CLASS_PROMPTS = {
 }
 
 FALLBACK_PROMPT = "a photograph of a natural disaster"
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 class CrisisDataset(Dataset):
@@ -91,13 +93,22 @@ class CrisisDataset(Dataset):
         return self.transform(Image.open(path).convert("RGB")), caption
 
 
+def find_latest_checkpoint(out_dir: Path, epochs: int) -> tuple[Path | None, int]:
+    """Return (checkpoint_path, completed_epochs) for the latest saved epoch."""
+    for e in range(epochs, 0, -1):
+        candidate = out_dir / f"epoch_{e:03d}"
+        if (candidate / "training_state.pt").exists():
+            return candidate, e
+    return None, 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--captions_file", default="../data/captions.json")
-    parser.add_argument("--output_dir", default="../checkpoints/sd_lora")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--captions_file", default=str(SCRIPT_DIR / "../../data/captions.json"))
+    parser.add_argument("--output_dir", default=str(SCRIPT_DIR / "../../checkpoints/sd_lora"))
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=32)
@@ -113,6 +124,12 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    resume_ckpt, start_epoch = find_latest_checkpoint(out_dir, args.epochs)
+    if resume_ckpt:
+        print(f"Resuming from epoch {start_epoch} ({resume_ckpt})")
+    else:
+        print("Starting from scratch")
+
     captions_path = Path(args.captions_file)
     if captions_path.exists():
         captions = json.loads(captions_path.read_text())
@@ -126,25 +143,30 @@ def main():
         args.model_id, torch_dtype=torch.float16, safety_checker=None
     )
     vae = pipe.vae.to(device)
-    unet = pipe.unet.to(device)
     text_encoder = pipe.text_encoder.to(device)
     tokenizer = pipe.tokenizer
     noise_scheduler = DDPMScheduler.from_pretrained(args.model_id, subfolder="scheduler")
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
-    unet.requires_grad_(False)
-    if args.gradient_checkpointing:
-        unet.enable_gradient_checkpointing()
 
-    lora_config = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_alpha,
-        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
-        lora_dropout=0.1,
-        bias="none",
-    )
-    unet = get_peft_model(unet, lora_config)
+    unet_base = pipe.unet
+    unet_base.requires_grad_(False)
+    if args.gradient_checkpointing:
+        unet_base.enable_gradient_checkpointing()
+
+    if resume_ckpt:
+        unet = PeftModel.from_pretrained(unet_base, str(resume_ckpt), is_trainable=True).to(device)
+    else:
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+            lora_dropout=0.1,
+            bias="none",
+        )
+        unet = get_peft_model(unet_base, lora_config).to(device)
+
     unet.print_trainable_parameters()
 
     dataset = CrisisDataset(Path(args.data_dir), captions, args.resolution)
@@ -164,7 +186,13 @@ def main():
     )
     scaler = torch.cuda.amp.GradScaler()
 
-    for epoch in range(args.epochs):
+    if resume_ckpt:
+        state = torch.load(resume_ckpt / "training_state.pt", map_location="cpu")
+        optimizer.load_state_dict(state["optimizer"])
+        lr_scheduler.load_state_dict(state["lr_scheduler"])
+        scaler.load_state_dict(state["scaler"])
+
+    for epoch in range(start_epoch, args.epochs):
         unet.train()
         total_loss = 0.0
         pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{args.epochs}")
@@ -205,12 +233,21 @@ def main():
             total_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.4f}")
 
-        print(f"Epoch {epoch + 1}: avg_loss={total_loss / len(loader):.4f}")
+        avg_loss = total_loss / len(loader)
+        print(f"Epoch {epoch + 1}: avg_loss={avg_loss:.4f}")
 
         if (epoch + 1) % args.save_every == 0:
             ckpt = out_dir / f"epoch_{epoch + 1:03d}"
             unet.save_pretrained(ckpt)
-            print(f"  Saved adapter -> {ckpt}")
+            torch.save(
+                {
+                    "optimizer": optimizer.state_dict(),
+                    "lr_scheduler": lr_scheduler.state_dict(),
+                    "scaler": scaler.state_dict(),
+                },
+                ckpt / "training_state.pt",
+            )
+            print(f"  Saved adapter + training state -> {ckpt}")
 
     unet.save_pretrained(out_dir / "final")
     print(f"\nDone. Final adapter: {out_dir / 'final'}")
