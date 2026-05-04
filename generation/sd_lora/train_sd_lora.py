@@ -6,8 +6,8 @@ Each image is conditioned on its VLM-generated caption (from generate_captions.p
 Falls back to a generic class-level prompt for any image without a caption.
 
 Training uses images from all tasks:
-  - real_256/<class>/       Task 1 (disaster types, 5 classes)
-  - real_extra_256/         Tasks 2/3/4 (extra disaster images)
+  - real_512/<class>/       Task 1 (disaster types, 5 classes)
+  - real_extra_512/         Tasks 2/3/4 (extra disaster images)
 
 Targets A100/H100/H200 cluster nodes (40-141 GB VRAM).
 Default batch size 32 fits comfortably on a single A100 40GB.
@@ -68,17 +68,17 @@ class CrisisDataset(Dataset):
         # Task 1: per-class images
         for cls in DISASTER_CLASSES:
             fallback = CLASS_PROMPTS[cls]
-            for p in sorted((data_dir / "real_256" / cls).glob("*.png")):
-                rel = f"real_256/{cls}/{p.name}"
+            for p in sorted((data_dir / "real_512" / cls).glob("*.png")):
+                rel = f"real_512/{cls}/{p.name}"
                 self.samples.append((p, captions.get(rel, fallback)))
                 if rel not in captions:
                     missing += 1
 
         # Tasks 2/3/4: extra images — only include if a caption exists
-        extra_dir = data_dir / "real_extra_256"
+        extra_dir = data_dir / "real_extra_512"
         if extra_dir.exists():
             for p in sorted(extra_dir.glob("*.png")):
-                rel = f"real_extra_256/{p.name}"
+                rel = f"real_extra_512/{p.name}"
                 if rel in captions:
                     self.samples.append((p, captions[rel]))
 

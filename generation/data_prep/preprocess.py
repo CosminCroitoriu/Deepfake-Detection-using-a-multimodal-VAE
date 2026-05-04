@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Preprocess CrisisNLP real images: center-crop to square, resize to 256x256,
+Preprocess CrisisNLP real images: center-crop to square, resize to target size,
 save as PNG.
 
 Run prepare_dataset.py first.
 
-Input:  ../data/real/<class>/   → ../data/real_256/<class>/
-        ../data/real_extra/     → ../data/real_extra_256/   (--include_extra)
+Input:  ../data/real/<class>/   → ../data/real_512/<class>/
+        ../data/real_extra/     → ../data/real_extra_512/   (--include_extra)
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,7 +20,7 @@ DISASTER_CLASSES = [
 ]
 
 
-def center_crop_resize(img: Image.Image, size: int = 256) -> Image.Image:
+def center_crop_resize(img: Image.Image, size: int = 512) -> Image.Image:
     w, h = img.size
     s = min(w, h)
     left = (w - s) // 2
@@ -64,11 +64,11 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--size", type=int, default=256)
+    parser.add_argument("--size", type=int, default=512)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument(
         "--include_extra", action="store_true",
-        help="Also process real_extra/ -> real_extra_256/ (Tasks 2 & 3 images for VAE training)",
+        help="Also process real_extra/ -> real_extra_512/ (Tasks 2 & 3 images for VAE training)",
     )
     args = parser.parse_args()
 
@@ -77,7 +77,7 @@ def main():
 
     # Task 1: per-class disaster images
     src_root = data_dir / "real"
-    dst_root = data_dir / "real_256"
+    dst_root = data_dir / f"real_{args.size}"
     print(f"Processing disaster class images ...")
     for cls in DISASTER_CLASSES:
         src_cls = src_root / cls
@@ -91,7 +91,7 @@ def main():
     # Tasks 2 & 3: extra images for VAE training (unlabeled)
     if args.include_extra:
         src_extra = data_dir / "real_extra"
-        dst_extra = data_dir / "real_extra_256"
+        dst_extra = data_dir / f"real_extra_{args.size}"
         if src_extra.exists():
             print(f"\nProcessing extra images (Tasks 2 & 3) ...")
             n = process_dir(src_extra, dst_extra, args.size, args.workers, "real_extra")
@@ -100,7 +100,7 @@ def main():
         else:
             print(f"\nWARNING: {src_extra} not found — run prepare_dataset.py first")
 
-    print(f"\nTotal: {total_ok} images processed -> {dst_root}")
+    print(f"\nTotal: {total_ok} images processed → {dst_root}")
 
 
 if __name__ == "__main__":
