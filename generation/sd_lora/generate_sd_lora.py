@@ -135,8 +135,8 @@ def main():
                     prompt,
                     num_inference_steps=args.steps,
                     guidance_scale=args.guidance_scale,
-                    height=256,
-                    width=256,
+                    height=512,
+                    width=512,
                 ).images[0]
             image.save(out_dir / f"{i:05d}.png")
 
