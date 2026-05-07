@@ -38,7 +38,7 @@ def generate_pool(
     tmp_dir.mkdir(parents=True, exist_ok=True)
     seeds = f"0-{n_total - 1}"
     cmd = [
-        sys.executable, str(repo_dir / "generate.py"),
+        sys.executable, str(repo_dir / "gen_images.py"),
         "--outdir", str(tmp_dir),
         "--network", str(checkpoint),
         "--seeds", seeds,
