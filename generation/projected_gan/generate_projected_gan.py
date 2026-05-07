@@ -16,6 +16,8 @@ from pathlib import Path
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 
 def latest_checkpoint(run_root: Path) -> Path | None:
     pkls = sorted(run_root.rglob("network-snapshot-*.pkl"))
@@ -46,9 +48,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--checkpoints_dir", default="../checkpoints/projected_gan")
-    parser.add_argument("--repo_dir", default="./projected_gan")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan"))
+    parser.add_argument("--repo_dir", default=str(SCRIPT_DIR / "projected_gan"))
     parser.add_argument("--n_images", type=int, default=500,
                         help="Images to generate per class (default: 500)")
     parser.add_argument("--truncation", type=float, default=0.7)
