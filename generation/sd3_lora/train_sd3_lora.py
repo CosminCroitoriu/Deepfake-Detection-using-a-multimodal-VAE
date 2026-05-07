@@ -6,8 +6,8 @@ Each image is conditioned on its VLM-generated caption (from generate_captions.p
 Falls back to a generic class-level prompt for any Task-1 image without a caption.
 
 Training uses images from all tasks:
-  - real_256/<class>/       Task 1 (disaster types, 5 classes)
-  - real_extra_256/         Tasks 2/3/4 (extra disaster images)
+  - real_512/<class>/       Task 1 (disaster types, 5 classes)
+  - real_extra_512/         Tasks 2/3/4 (extra disaster images)
 
 Uses SD3's flow-matching objective. Text encoders (CLIP-L, CLIP-G, T5-XXL) remain
 on GPU throughout training and encode captions per batch. Only the MMDiT transformer
@@ -45,6 +45,16 @@ MODEL_ID = "stabilityai/stable-diffusion-3-medium-diffusers"
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def find_latest_checkpoint(out_dir: Path, epochs: int) -> tuple[Path | None, int]:
+    for e in range(epochs, 0, -1):
+        candidate = out_dir / f"epoch_{e:03d}"
+        if (candidate / "training_state.pt").exists():
+            return candidate, e
+    return None, 0
+
 CLASS_PROMPTS = {
     "earthquake": "a photograph of earthquake damage",
     "fire":       "a photograph of a wildfire disaster",
@@ -68,19 +78,23 @@ class CrisisDataset(Dataset):
         # Task 1: per-class images
         for cls in DISASTER_CLASSES:
             fallback = CLASS_PROMPTS[cls]
-            for p in sorted((data_dir / "real_256" / cls).glob("*.png")):
-                rel = f"real_256/{cls}/{p.name}"
-                self.samples.append((p, captions.get(rel, fallback)))
-                if rel not in captions:
+            for p in sorted((data_dir / "real_512" / cls).glob("*.png")):
+                rel = f"real_512/{cls}/{p.name}"
+                rel_legacy = f"real_256/{cls}/{p.name}"
+                caption = captions.get(rel) or captions.get(rel_legacy, fallback)
+                self.samples.append((p, caption))
+                if rel not in captions and rel_legacy not in captions:
                     missing += 1
 
         # Tasks 2/3/4: extra images — only include if a caption exists
-        extra_dir = data_dir / "real_extra_256"
+        extra_dir = data_dir / "real_extra_512"
         if extra_dir.exists():
             for p in sorted(extra_dir.glob("*.png")):
-                rel = f"real_extra_256/{p.name}"
-                if rel in captions:
-                    self.samples.append((p, captions[rel]))
+                rel = f"real_extra_512/{p.name}"
+                rel_legacy = f"real_extra_256/{p.name}"
+                caption = captions.get(rel) or captions.get(rel_legacy)
+                if caption:
+                    self.samples.append((p, caption))
 
         if missing:
             print(f"  WARNING: {missing} Task-1 images have no caption, using class fallback")
@@ -97,9 +111,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--captions_file", default="../data/captions.json")
-    parser.add_argument("--output_dir", default="../checkpoints/sd3_lora")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--captions_file", default=str(SCRIPT_DIR / "../../data/captions.json"))
+    parser.add_argument("--output_dir", default=str(SCRIPT_DIR / "../../checkpoints/sd3_lora"))
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=16)
@@ -113,6 +127,12 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    resume_ckpt, start_epoch = find_latest_checkpoint(out_dir, args.epochs)
+    if resume_ckpt:
+        print(f"Resuming from epoch {start_epoch} ({resume_ckpt})")
+    else:
+        print("Starting from scratch")
 
     captions_path = Path(args.captions_file)
     if captions_path.exists():
@@ -145,15 +165,19 @@ def main():
         args.model_id, subfolder="scheduler"
     )
 
-    lora_config = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_alpha,
-        target_modules=["to_q", "to_k", "to_v", "to_out.0",
-                        "add_q_proj", "add_k_proj", "add_v_proj"],
-        lora_dropout=0.1,
-        bias="none",
-    )
-    transformer = get_peft_model(transformer, lora_config)
+    if resume_ckpt:
+        from peft import PeftModel
+        transformer = PeftModel.from_pretrained(transformer, str(resume_ckpt), is_trainable=True).to(device)
+    else:
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            target_modules=["to_q", "to_k", "to_v", "to_out.0",
+                            "add_q_proj", "add_k_proj", "add_v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+        )
+        transformer = get_peft_model(transformer, lora_config)
     transformer.print_trainable_parameters()
 
     dataset = CrisisDataset(Path(args.data_dir), captions, args.resolution)
@@ -173,9 +197,15 @@ def main():
     )
     scaler = torch.cuda.amp.GradScaler()
 
+    if resume_ckpt:
+        state = torch.load(resume_ckpt / "training_state.pt", map_location="cpu")
+        optimizer.load_state_dict(state["optimizer"])
+        lr_scheduler.load_state_dict(state["lr_scheduler"])
+        scaler.load_state_dict(state["scaler"])
+
     T = noise_scheduler.config.num_train_timesteps
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         transformer.train()
         total_loss = 0.0
         pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{args.epochs}")
@@ -230,7 +260,15 @@ def main():
         if (epoch + 1) % args.save_every == 0:
             ckpt = out_dir / f"epoch_{epoch + 1:03d}"
             transformer.save_pretrained(ckpt)
-            print(f"  Saved adapter -> {ckpt}")
+            torch.save(
+                {
+                    "optimizer": optimizer.state_dict(),
+                    "lr_scheduler": lr_scheduler.state_dict(),
+                    "scaler": scaler.state_dict(),
+                },
+                ckpt / "training_state.pt",
+            )
+            print(f"  Saved adapter + training state -> {ckpt}")
 
     transformer.save_pretrained(out_dir / "final")
     print(f"\nDone. Final adapter: {out_dir / 'final'}")
