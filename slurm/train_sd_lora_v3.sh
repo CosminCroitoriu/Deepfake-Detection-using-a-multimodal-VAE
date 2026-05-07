@@ -2,7 +2,7 @@
 #SBATCH --job-name=train_sd_lora_v3
 #SBATCH --output=/export/home/acs/stud/c/cosmin.croitoriu/Deepfake-Detection-using-a-multimodal-VAE/slurm/logs/train_sd_lora_%j.out
 #SBATCH --error=/export/home/acs/stud/c/cosmin.croitoriu/Deepfake-Detection-using-a-multimodal-VAE/slurm/logs/train_sd_lora_%j.err
-#SBATCH --partition=gpu
+#SBATCH --partition=dgxa100
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G

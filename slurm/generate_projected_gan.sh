@@ -2,7 +2,7 @@
 #SBATCH --job-name=generate_projected_gan
 #SBATCH --output=/export/home/acs/stud/c/cosmin.croitoriu/Deepfake-Detection-using-a-multimodal-VAE/slurm/logs/generate_projected_gan_%j.out
 #SBATCH --error=/export/home/acs/stud/c/cosmin.croitoriu/Deepfake-Detection-using-a-multimodal-VAE/slurm/logs/generate_projected_gan_%j.err
-#SBATCH --partition=gpu
+#SBATCH --partition=dgxa100
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
