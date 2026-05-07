@@ -20,8 +20,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def latest_checkpoint(run_root: Path) -> Path | None:
-    pkls = sorted(run_root.rglob("network-snapshot-*.pkl"))
-    return pkls[-1] if pkls else None
+    # Prefer numbered snapshots (network-snapshot-XXXXXX.pkl); fall back to rolling snapshot
+    numbered = sorted(run_root.rglob("network-snapshot-*.pkl"))
+    if numbered:
+        return numbered[-1]
+    rolling = list(run_root.rglob("network-snapshot.pkl"))
+    return rolling[0] if rolling else None
 
 
 def generate_pool(
