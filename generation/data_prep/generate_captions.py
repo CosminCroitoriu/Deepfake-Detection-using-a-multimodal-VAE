@@ -142,15 +142,15 @@ def collect_images(data_dir: Path) -> list[tuple[Path, str, str | None]]:
     images = []
 
     for cls in DISASTER_CLASSES:
-        cls_dir = data_dir / "real_256" / cls
+        cls_dir = data_dir / "real_512" / cls
         if cls_dir.exists():
             for p in sorted(cls_dir.glob("*.png")):
-                images.append((p, f"real_256/{cls}/{p.name}", cls))
+                images.append((p, f"real_512/{cls}/{p.name}", cls))
 
-    extra_dir = data_dir / "real_extra_256"
+    extra_dir = data_dir / "real_extra_512"
     if extra_dir.exists():
         for p in sorted(extra_dir.glob("*.png")):
-            images.append((p, f"real_extra_256/{p.name}", None))
+            images.append((p, f"real_extra_512/{p.name}", None))
 
     return images
 

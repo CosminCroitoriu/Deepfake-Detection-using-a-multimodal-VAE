@@ -70,8 +70,10 @@ class CrisisDataset(Dataset):
             fallback = CLASS_PROMPTS[cls]
             for p in sorted((data_dir / "real_512" / cls).glob("*.png")):
                 rel = f"real_512/{cls}/{p.name}"
-                self.samples.append((p, captions.get(rel, fallback)))
-                if rel not in captions:
+                rel_legacy = f"real_256/{cls}/{p.name}"
+                caption = captions.get(rel) or captions.get(rel_legacy, fallback)
+                self.samples.append((p, caption))
+                if rel not in captions and rel_legacy not in captions:
                     missing += 1
 
         # Tasks 2/3/4: extra images — only include if a caption exists
@@ -79,8 +81,10 @@ class CrisisDataset(Dataset):
         if extra_dir.exists():
             for p in sorted(extra_dir.glob("*.png")):
                 rel = f"real_extra_512/{p.name}"
-                if rel in captions:
-                    self.samples.append((p, captions[rel]))
+                rel_legacy = f"real_extra_256/{p.name}"
+                caption = captions.get(rel) or captions.get(rel_legacy)
+                if caption:
+                    self.samples.append((p, caption))
 
         if missing:
             print(f"  WARNING: {missing} Task-1 images have no caption, using class fallback")
