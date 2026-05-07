@@ -12,6 +12,8 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 from PIL import Image
 from tqdm import tqdm
 
@@ -63,7 +65,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
     parser.add_argument("--size", type=int, default=512)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument(
