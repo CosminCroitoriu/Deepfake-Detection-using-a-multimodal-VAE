@@ -18,6 +18,8 @@ from pathlib import Path
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
 REPO_URL = "https://github.com/NVlabs/stylegan2-ada-pytorch.git"
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 
 def clone_repo(repo_dir: Path):
     if repo_dir.exists():
@@ -42,6 +44,16 @@ def make_dataset_zip(src_dir: Path, zip_path: Path, repo_dir: Path):
     )
 
 
+def latest_snapshot(out_dir: Path) -> str | None:
+    """Return path to latest network-snapshot-*.pkl in the run directory, or None."""
+    run_dirs = sorted(out_dir.glob("*-stylegan2ada-*"))
+    for run_dir in reversed(run_dirs):
+        snaps = sorted(run_dir.glob("network-snapshot-*.pkl"))
+        if snaps:
+            return str(snaps[-1])
+    return None
+
+
 def train_class(
     cls: str,
     dataset_zip: Path,
@@ -53,18 +65,25 @@ def train_class(
     resume: str | None,
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Auto-resume from latest snapshot if no explicit resume given
+    if resume is None:
+        resume = latest_snapshot(out_dir)
+        if resume:
+            print(f"  Auto-resuming from {resume}")
+
     cmd = [
         sys.executable, str(repo_dir / "train.py"),
         "--outdir", str(out_dir),
         "--data", str(dataset_zip),
-        "--cfg", "paper256",       # 256x256 output
+        "--cfg", "paper512",
         "--gpus", str(gpus),
         "--batch", str(batch),
-        "--gamma", "8.2",
+        "--gamma", "65",
         "--aug", "ada",
-        "--target", "0.6",         # ADA target discriminator augmentation probability
+        "--target", "0.6",
         "--kimg", str(kimg),
-        "--snap", "50",            # save snapshot every 50 kimg
+        "--snap", "50",
         "--mirror", "1",
     ]
     if resume:
@@ -78,9 +97,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--repo_dir", default="./stylegan2-ada-pytorch")
-    parser.add_argument("--checkpoints_dir", default="../checkpoints/stylegan2")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--repo_dir", default=str(SCRIPT_DIR / "stylegan2-ada-pytorch"))
+    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/stylegan2"))
     parser.add_argument("--gpus", type=int, default=1)
     parser.add_argument("--batch", type=int, default=32,
                         help="Total batch size across all GPUs")
@@ -89,11 +108,11 @@ def main():
     parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
                         choices=DISASTER_CLASSES)
     parser.add_argument("--resume", default=None,
-                        help="Resume from a .pkl checkpoint (applies to all classes)")
+                        help="Explicit .pkl checkpoint to resume from (overrides auto-resume)")
     args = parser.parse_args()
 
     repo_dir = Path(args.repo_dir)
-    data_root = Path(args.data_dir) / "real_256"
+    data_root = Path(args.data_dir) / "real_512"
     ckpt_root = Path(args.checkpoints_dir)
 
     clone_repo(repo_dir)
