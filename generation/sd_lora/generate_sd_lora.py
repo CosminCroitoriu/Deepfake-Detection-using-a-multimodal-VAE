@@ -15,6 +15,8 @@ import random
 from pathlib import Path
 
 import torch
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 from diffusers import StableDiffusionPipeline
 from diffusers.models import UNet2DConditionModel
 from peft import PeftModel
@@ -63,7 +65,7 @@ def load_class_captions(captions_path: Path, data_dir: Path) -> dict[str, list[s
     class_caps: dict[str, list[str]] = {cls: [] for cls in DISASTER_CLASSES}
     for rel_key, caption in all_captions.items():
         for cls in DISASTER_CLASSES:
-            if rel_key.startswith(f"real_256/{cls}/"):
+            if rel_key.startswith(f"real_512/{cls}/") or rel_key.startswith(f"real_256/{cls}/"):
                 class_caps[cls].append(caption)
                 break
     return class_caps
@@ -89,9 +91,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--captions_file", default="../data/captions.json")
-    parser.add_argument("--adapter_path", default="../checkpoints/sd_lora/final")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--captions_file", default=str(SCRIPT_DIR / "../../data/captions.json"))
+    parser.add_argument("--adapter_path", default=str(SCRIPT_DIR / "../../checkpoints/sd_lora_v3/final"))
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--n_images", type=int, default=500,
                         help="Images to generate per class (default: 500)")

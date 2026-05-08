@@ -5,8 +5,7 @@ Generate fake disaster images using SD3-medium + LoRA adapter.
 Prompts are sampled from the VLM-generated captions (data/captions.json).
 Falls back to hardcoded class-level prompts if captions are unavailable.
 
-Images are generated at 512×512 and downsampled to 256×256 to match the
-CrisisNLP dataset resolution.
+Images are generated at 512×512.
 
 Prerequisites:
   Accept the model license at huggingface.co/stabilityai/stable-diffusion-3-medium-diffusers
@@ -23,6 +22,8 @@ import random
 from pathlib import Path
 
 import torch
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 from diffusers import StableDiffusion3Pipeline
 from peft import PeftModel
 from PIL import Image
@@ -86,7 +87,7 @@ def load_class_captions(captions_path: Path) -> dict[str, list[str]]:
     class_caps: dict[str, list[str]] = {cls: [] for cls in DISASTER_CLASSES}
     for rel_key, caption in all_captions.items():
         for cls in DISASTER_CLASSES:
-            if rel_key.startswith(f"real_256/{cls}/"):
+            if rel_key.startswith(f"real_512/{cls}/") or rel_key.startswith(f"real_256/{cls}/"):
                 class_caps[cls].append(caption)
                 break
     return class_caps
@@ -96,17 +97,17 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--data_dir", default="../data")
-    parser.add_argument("--captions_file", default="../data/captions.json")
-    parser.add_argument("--lora_dir", default="../checkpoints/sd3_lora/final")
+    parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
+    parser.add_argument("--captions_file", default=str(SCRIPT_DIR / "../../data/captions.json"))
+    parser.add_argument("--lora_dir", default=str(SCRIPT_DIR / "../../checkpoints/sd3_lora/final"))
     parser.add_argument("--model_id", default=MODEL_ID)
     parser.add_argument("--n_images", type=int, default=500)
     parser.add_argument("--steps", type=int, default=28)
     parser.add_argument("--guidance_scale", type=float, default=7.0)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
-    parser.add_argument("--output_size", type=int, default=256,
-                        help="Resize generated images to this square size (default: 256)")
+    parser.add_argument("--output_size", type=int, default=512,
+                        help="Resize generated images to this square size (default: 512)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
                         choices=DISASTER_CLASSES)
