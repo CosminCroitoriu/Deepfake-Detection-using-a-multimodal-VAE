@@ -29,6 +29,23 @@ def clone_repo(repo_dir: Path):
     subprocess.run(["git", "clone", REPO_URL, str(repo_dir)], check=True)
 
 
+def apply_patches(repo_dir: Path):
+    # Patch 1: misc.py — PyTorch ≥1.11 removed the dataset arg from Sampler.__init__
+    misc_path = repo_dir / "torch_utils" / "misc.py"
+    text = misc_path.read_text()
+    if "super().__init__(dataset)" in text:
+        misc_path.write_text(text.replace("super().__init__(dataset)", "super().__init__()"))
+        print("  Patched torch_utils/misc.py")
+
+    # Patch 2: train.py — PyTorch ≥2.0 rejects mixed int/float betas in Adam
+    train_path = repo_dir / "train.py"
+    text = train_path.read_text()
+    patched = text.replace("betas=[0,", "betas=[0.0,")
+    if patched != text:
+        train_path.write_text(patched)
+        print("  Patched train.py (betas)")
+
+
 def make_dataset_zip(src_dir: Path, zip_path: Path, repo_dir: Path):
     if zip_path.exists():
         print(f"  Dataset zip exists: {zip_path.name}")
@@ -116,6 +133,7 @@ def main():
     ckpt_root = Path(args.checkpoints_dir)
 
     clone_repo(repo_dir)
+    apply_patches(repo_dir)
 
     for cls in args.classes:
         cls_dir = data_root / cls
