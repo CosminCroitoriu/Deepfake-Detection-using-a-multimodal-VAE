@@ -45,14 +45,18 @@ def apply_patches(repo_dir: Path):
         train_path.write_text(patched)
         print("  Patched train.py (betas)")
 
-    # Patch 4: training/loss.py — R1 uses create_graph=True (needs 2nd-order grid_sample grad,
-    # absent in PyTorch 2.x); set False so R1 value is reported but gradient is detached
+    # Patch 4: training/loss.py — R1 and path-length both use create_graph=True (needs 2nd-order
+    # grads, absent in PyTorch 2.x); disable create_graph but add retain_graph=True so the forward
+    # graph survives until the outer .backward() call
     loss_path = repo_dir / "training" / "loss.py"
     text = loss_path.read_text()
-    patched = text.replace("create_graph=True", "create_graph=False")
+    patched = text.replace(
+        "create_graph=True",
+        "create_graph=False, retain_graph=True",
+    )
     if patched != text:
         loss_path.write_text(patched)
-        print("  Patched training/loss.py (R1 create_graph)")
+        print("  Patched training/loss.py (R1 + path-length create_graph)")
 
     # Patch 3: grid_sample_gradfix.py — PyTorch >=2.x dropped grid_sampler_2d_backward;
     # replace entire file with a minimal stub that always uses native F.grid_sample
