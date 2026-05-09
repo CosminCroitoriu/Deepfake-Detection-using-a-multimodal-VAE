@@ -45,6 +45,13 @@ def apply_patches(repo_dir: Path):
         train_path.write_text(patched)
         print("  Patched train.py (betas)")
 
+    # Patch 3: grid_sample_gradfix.py — PyTorch ≥2.0 dropped grid_sampler_2d_backward
+    grid_path = repo_dir / "torch_utils" / "ops" / "grid_sample_gradfix.py"
+    text = grid_path.read_text()
+    if "enabled = True" in text:
+        grid_path.write_text(text.replace("enabled = True", "enabled = False"))
+        print("  Patched torch_utils/ops/grid_sample_gradfix.py")
+
 
 def make_dataset_zip(src_dir: Path, zip_path: Path, repo_dir: Path):
     if zip_path.exists():
