@@ -45,11 +45,20 @@ def apply_patches(repo_dir: Path):
         train_path.write_text(patched)
         print("  Patched train.py (betas)")
 
-    # Patch 3: grid_sample_gradfix.py — PyTorch ≥2.0 dropped grid_sampler_2d_backward
+    # Patch 3: grid_sample_gradfix.py — PyTorch >=2.x dropped grid_sampler_2d_backward;
+    # replace entire file with a minimal stub that always uses native F.grid_sample
     grid_path = repo_dir / "torch_utils" / "ops" / "grid_sample_gradfix.py"
-    text = grid_path.read_text()
-    if "enabled = True" in text:
-        grid_path.write_text(text.replace("enabled = True", "enabled = False"))
+    if grid_path.exists() and "_GridSample2dForward" in grid_path.read_text():
+        grid_path.write_text(
+            "# Patched: PyTorch >=2.x dropped grid_sampler_2d_backward\n"
+            "import torch\n\n"
+            "enabled = False\n\n"
+            "def grid_sample(input, grid, *, mode='bilinear', padding_mode='zeros', align_corners=False):\n"
+            "    return torch.nn.functional.grid_sample(\n"
+            "        input=input, grid=grid, mode=mode,\n"
+            "        padding_mode=padding_mode, align_corners=align_corners\n"
+            "    )\n"
+        )
         print("  Patched torch_utils/ops/grid_sample_gradfix.py")
 
 
