@@ -35,9 +35,10 @@ class UpBlock(nn.Module):
         self.up = nn.ConvTranspose2d(in_ch, out_ch, 2, stride=2)
         self.conv = ConvBlock(out_ch + skip_ch, out_ch)
 
-    def forward(self, x, skip):
+    def forward(self, x, skip=None):
         x = self.up(x)
-        x = torch.cat([x, skip], dim=1)
+        if skip is not None:
+            x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
 
@@ -92,7 +93,7 @@ class SVDUNetVAE(nn.Module):
         h = self.decode_proj(z)
         skip_list = list(reversed(skips[:-1]))  # skip the innermost (same as z)
         for i, block in enumerate(self.dec):
-            skip = skip_list[i] if i < len(skip_list) else torch.zeros_like(h)
+            skip = skip_list[i] if i < len(skip_list) else None
             h = block(h, skip)
         return torch.tanh(self.head(h))
 
