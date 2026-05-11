@@ -127,10 +127,13 @@ def main():
     )
     parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
     parser.add_argument("--repo_dir", default=str(SCRIPT_DIR / "projected_gan"))
-    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan"))
+    parser.add_argument("--checkpoints_dir", default=None,
+                        help="Override checkpoint directory (default: checkpoints/projected_gan_<res>)")
     parser.add_argument("--gpus", type=int, default=1)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--kimg", type=int, default=5000)
+    parser.add_argument("--img_res", type=int, default=256, choices=[256, 512],
+                        help="Training resolution (default: 256)")
     parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
                         choices=DISASTER_CLASSES)
     parser.add_argument("--resume", default=None,
@@ -138,8 +141,9 @@ def main():
     args = parser.parse_args()
 
     repo_dir = Path(args.repo_dir)
-    data_root = Path(args.data_dir) / "real_256"
-    ckpt_root = Path(args.checkpoints_dir)
+    data_root = Path(args.data_dir) / f"real_{args.img_res}"
+    default_ckpt = str(SCRIPT_DIR / f"../../checkpoints/projected_gan_{args.img_res}")
+    ckpt_root = Path(args.checkpoints_dir or default_ckpt)
 
     clone_repo(repo_dir)
     apply_patches(repo_dir)

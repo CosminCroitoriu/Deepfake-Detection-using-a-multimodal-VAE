@@ -53,8 +53,10 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
-    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan"))
+    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan_256"))
     parser.add_argument("--repo_dir", default=str(SCRIPT_DIR / "projected_gan"))
+    parser.add_argument("--output_dir", default=None,
+                        help="Override fake image output directory (default: data/fake/projected_gan)")
     parser.add_argument("--n_images", type=int, default=500,
                         help="Images to generate per class (default: 500)")
     parser.add_argument("--truncation", type=float, default=0.7)
@@ -75,7 +77,7 @@ def main():
 
     n_classes = len(args.classes)
     n_total = args.n_images * n_classes
-    out_root = Path(args.data_dir) / "fake" / "projected_gan"
+    out_root = Path(args.output_dir) if args.output_dir else Path(args.data_dir) / "fake" / "projected_gan"
     tmp_dir = out_root / "_pool"
 
     print(f"Generating {n_total} images ({args.n_images} per class) ...")
