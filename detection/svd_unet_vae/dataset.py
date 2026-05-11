@@ -100,15 +100,23 @@ class EvalDataset(Dataset):
         all_fake = _collect_images(fake_root, DISASTER_CLASSES)
         rng2 = random.Random(seed + 1)
         rng2.shuffle(all_fake)
-        n_thresh = int(len(all_fake) * fake_thresh_frac)
+
+        # balance: cap fakes to the number of real test images, then split both 20/80
+        n_eval = min(len(all_fake), len(real_test))
+        real_eval = real_test[:n_eval]
+        fake_eval = all_fake[:n_eval]
+
+        n_thresh = int(n_eval * fake_thresh_frac)
         if subset == "thresh":
-            fake_split = all_fake[:n_thresh]
+            real_split = real_eval[:n_thresh]
+            fake_split = fake_eval[:n_thresh]
         else:
-            fake_split = all_fake[n_thresh:]
+            real_split = real_eval[n_thresh:]
+            fake_split = fake_eval[n_thresh:]
 
         # build combined list of (path, label)
         self.samples: List[Tuple[Path, int]] = (
-            [(p, 0) for p in real_test] + [(p, 1) for p in fake_split]
+            [(p, 0) for p in real_split] + [(p, 1) for p in fake_split]
         )
         rng3 = random.Random(seed + 2)
         rng3.shuffle(self.samples)
