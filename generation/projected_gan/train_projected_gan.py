@@ -132,8 +132,8 @@ def main():
     parser.add_argument("--gpus", type=int, default=1)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--kimg", type=int, default=5000)
-    parser.add_argument("--img_res", type=int, default=256, choices=[256, 512],
-                        help="Training resolution (default: 256)")
+    parser.add_argument("--img_res", type=int, default=512, choices=[256, 512],
+                        help="Training resolution (default: 512)")
     parser.add_argument("--classes", nargs="+", default=DISASTER_CLASSES,
                         choices=DISASTER_CLASSES)
     parser.add_argument("--resume", default=None,
