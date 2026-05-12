@@ -157,7 +157,16 @@ def main():
     make_dataset_zip(merged_dir, zip_path, repo_dir)
 
     out_dir = ckpt_root / "training_runs"
-    train(zip_path, out_dir, repo_dir, args.gpus, args.batch, args.kimg, args.resume)
+
+    # Auto-resume from latest snapshot if no explicit resume given
+    resume = args.resume
+    if resume is None:
+        snaps = sorted(out_dir.rglob("network-snapshot-*.pkl"))
+        if snaps:
+            resume = str(snaps[-1])
+            print(f"Auto-resuming from {resume}")
+
+    train(zip_path, out_dir, repo_dir, args.gpus, args.batch, args.kimg, resume)
 
     print(f"\nProjectedGAN training complete. Checkpoints in {out_dir}")
     print("Next: run generate_projected_gan.py")
