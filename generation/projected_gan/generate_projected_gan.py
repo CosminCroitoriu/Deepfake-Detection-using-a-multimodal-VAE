@@ -5,7 +5,7 @@ Generate fake disaster images from a trained ProjectedGAN checkpoint.
 ProjectedGAN is trained unconditionally on mixed classes, so images are
 distributed evenly across class folders by seed range.
 
-Input:  ../checkpoints/projected_gan/training_runs/
+Input:  ../checkpoints/projected_gan_512/training_runs/
 Output: ../data/fake/projected_gan/<class>/
 """
 import argparse
@@ -53,7 +53,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
-    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan_256"))
+    parser.add_argument("--checkpoints_dir", default=str(SCRIPT_DIR / "../../checkpoints/projected_gan_512"))
     parser.add_argument("--repo_dir", default=str(SCRIPT_DIR / "projected_gan"))
     parser.add_argument("--output_dir", default=None,
                         help="Override fake image output directory (default: data/fake/projected_gan)")
