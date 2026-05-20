@@ -10,7 +10,7 @@ import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
 
-TARGET_SIZE = 256
+TARGET_SIZE = 512
 ENERGY_THRESHOLD = 0.90
 
 

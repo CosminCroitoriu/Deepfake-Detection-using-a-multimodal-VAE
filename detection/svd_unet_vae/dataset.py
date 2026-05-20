@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 from .svd_transform import SVDTransform
 
 DISASTER_CLASSES = ["earthquake", "fire", "flood", "hurricane", "landslide"]
-GENERATOR_DIRS = ["sd_lora", "sd3_lora", "projected_gan", "stylegan2"]
+GENERATOR_DIRS = ["sd_lora", "sd3_lora", "projected_gan_512", "stylegan2"]
 
 
 def _collect_images(root: Path, classes: List[str]) -> List[Path]:
@@ -38,21 +38,27 @@ class RealTrainDataset(Dataset):
         seed: int = 42,
         transform: SVDTransform = None,
     ):
-        data_root = Path(data_dir) / "real_512"
-        all_paths = _collect_images(data_root, DISASTER_CLASSES)
+        data_root = Path(data_dir)
 
+        # Task 1 images — deterministic train/val/test split
+        task1_paths = _collect_images(data_root / "real_512", DISASTER_CLASSES)
         rng = random.Random(seed)
-        rng.shuffle(all_paths)
-        n = len(all_paths)
+        rng.shuffle(task1_paths)
+        n = len(task1_paths)
         n_train = int(n * train_frac)
         n_val = int(n * val_frac)
 
         if split == "train":
-            self.paths = all_paths[:n_train]
+            self.paths = task1_paths[:n_train]
+            # Also include Tasks 2/3/4 extra images (train split only)
+            extra_root = data_root / "real_extra_512"
+            if extra_root.exists():
+                extra = sorted(extra_root.glob("*.png")) + sorted(extra_root.glob("*.jpg"))
+                self.paths = self.paths + extra
         elif split == "val":
-            self.paths = all_paths[n_train: n_train + n_val]
+            self.paths = task1_paths[n_train: n_train + n_val]
         else:
-            self.paths = all_paths[n_train + n_val:]
+            self.paths = task1_paths[n_train + n_val:]
 
         self.transform = transform or SVDTransform()
 

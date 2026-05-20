@@ -5,8 +5,8 @@ Architecture (Sarkar et al., 2025 adaptation for 256×256 greyscale):
   Encoder: 6 convolutional blocks (stride-2), channels [32,64,128,256,512,512]
   Bottleneck: convolutional VAE (mu + logvar via 1×1 Conv2d, 4×4 spatial)
   Decoder: 6 transposed-conv blocks with skip connections (concat)
-  Input:  1×256×256   (SVD low-rank approximation, normalised to [-1,1])
-  Output: 1×256×256   (reconstructed greyscale, normalised to [-1,1])
+  Input:  1×512×512   (SVD low-rank approximation, normalised to [-1,1])
+  Output: 1×512×512   (reconstructed greyscale, normalised to [-1,1])
 """
 import torch
 import torch.nn as nn
