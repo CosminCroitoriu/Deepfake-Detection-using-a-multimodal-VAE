@@ -8,7 +8,9 @@ import random
 from pathlib import Path
 from typing import List, Tuple
 
-from PIL import Image
+from PIL import Image, PngImagePlugin
+
+PngImagePlugin.MAX_TEXT_CHUNK = 100 * 1024 * 1024  # allow large ICC profiles
 from torch.utils.data import Dataset
 
 from .svd_transform import SVDTransform
