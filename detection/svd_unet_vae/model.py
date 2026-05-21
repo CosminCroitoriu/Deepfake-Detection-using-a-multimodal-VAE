@@ -104,11 +104,15 @@ class SVDUNetVAE(nn.Module):
         return recon, mu, logvar
 
     # ------------------------------------------------------------------
-    def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:
-        """Per-sample MSE between input and reconstruction (no gradient)."""
+    def reconstruction_error(self, x_input: torch.Tensor, x_target: torch.Tensor) -> torch.Tensor:
+        """Per-sample MSE between reconstruction and the training target.
+
+        The model is trained to map x_input (i_low) -> x_target (i_gray);
+        the anomaly score must measure error against x_target, not x_input.
+        """
         with torch.inference_mode():
-            recon, _, _ = self.forward(x)
-        err = F.mse_loss(recon, x, reduction="none")
+            recon, _, _ = self.forward(x_input)
+        err = F.mse_loss(recon, x_target, reduction="none")
         return err.mean(dim=[1, 2, 3])
 
 

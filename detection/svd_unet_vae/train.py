@@ -46,7 +46,7 @@ def main():
     parser.add_argument("--ckpt_dir", default=str(SCRIPT_DIR / "../../checkpoints/svd_unet_vae"))
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--latent_dim", type=int, default=256)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
@@ -68,7 +68,7 @@ def main():
                             num_workers=args.num_workers, pin_memory=True)
 
     model = SVDUNetVAE(latent_dim=args.latent_dim).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     start_epoch = 0

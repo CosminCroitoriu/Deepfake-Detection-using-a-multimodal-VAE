@@ -34,7 +34,7 @@ fi
 python -m detection.svd_unet_vae.train \
     --epochs 100 \
     --batch 32 \
-    --lr 1e-4 \
+    --lr 1e-3 \
     --latent_dim 256 \
     --num_workers 8 \
     $RESUME_FLAG

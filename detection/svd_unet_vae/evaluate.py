@@ -41,7 +41,8 @@ def collect_scores(model, loader, device):
     all_errors, all_labels = [], []
     for i_low, i_gray, labels in tqdm(loader, leave=False):
         i_low = i_low.to(device)
-        errors = model.reconstruction_error(i_low).cpu().numpy()
+        i_gray = i_gray.to(device)
+        errors = model.reconstruction_error(i_low, i_gray).cpu().numpy()
         all_errors.append(errors)
         all_labels.append(labels.numpy())
     return np.concatenate(all_errors), np.concatenate(all_labels)
