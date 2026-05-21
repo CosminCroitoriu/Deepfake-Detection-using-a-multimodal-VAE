@@ -68,7 +68,7 @@ def main():
                             num_workers=args.num_workers, pin_memory=True)
 
     model = SVDUNetVAE(latent_dim=args.latent_dim).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     start_epoch = 0
