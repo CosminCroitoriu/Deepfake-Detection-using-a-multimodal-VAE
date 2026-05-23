@@ -25,6 +25,7 @@ echo "  Time        : $(date)"
 echo ""
 
 python generation/data_prep/preprocess_ffpp.py \
+    --raw_dir data/ffpp_raw/FaceForensics++_C23 \
     --frames_per_video 32 \
     --target_size 256 \
     --manipulations original Deepfakes Face2Face FaceSwap NeuralTextures
