@@ -30,7 +30,7 @@ def run_epoch(model, loader, optimizer, device, training: bool):
             target_5ch = target_5ch.to(device)
             recon_svd, recon_dct, recon_rgb, mu, logvar, alpha = model(input_5ch)
             loss = gated_vae_loss(recon_svd, recon_dct, recon_rgb,
-                                  target_5ch, mu, logvar)
+                                  target_5ch, mu, logvar, alpha)
             if training:
                 optimizer.zero_grad()
                 loss.backward()

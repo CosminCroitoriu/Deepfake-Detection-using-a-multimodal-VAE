@@ -218,16 +218,22 @@ class GatedMultimodalVAE(nn.Module):
 def gated_vae_loss(
     recon_svd, recon_dct, recon_rgb,
     target_5ch,
-    mu, logvar,
+    mu, logvar, alpha,
     beta_kl: float = 0.6,
     beta_l1: float = 0.6,
+    gate_diversity_weight: float = 0.1,
 ):
     """
-    L = L_recon_svd + L_recon_dct + L_recon_rgb + beta_kl·KL + beta_l1·L1_total
+    L = alpha-weighted(MSE + 0.6·L1) + beta_kl·KL + gate_diversity_weight·diversity_penalty
 
-    Note: per the implementation plan, all three modalities contribute equally
-    to the reconstruction loss. The gate's job is to weight them at the latent
-    fusion (and at inference scoring), not in the loss.
+    Two changes vs the original spec:
+    1. Reconstruction loss is α-WEIGHTED (matches the inference anomaly score
+       formula). Without this, α has no gradient signal in the loss → the gate
+       collapses to uniform 1/3 weights and provides no per-sample
+       specialization.
+    2. Diversity penalty pushes the BATCH-AVERAGED α toward uniform so the gate
+       can't globally collapse to a single modality. Per-sample α can still be
+       sharp; only the batch average is constrained.
     """
     tgt_svd, tgt_dct, tgt_rgb = (
         target_5ch[:, 0:1],
@@ -235,16 +241,37 @@ def gated_vae_loss(
         target_5ch[:, 2:5],
     )
 
-    mse_svd = F.mse_loss(recon_svd, tgt_svd)
-    mse_dct = F.mse_loss(recon_dct, tgt_dct)
-    mse_rgb = F.mse_loss(recon_rgb, tgt_rgb)
-    mse_total = mse_svd + mse_dct + mse_rgb
+    # Per-sample MSE (no batch reduction yet)
+    mse_svd_p = F.mse_loss(recon_svd, tgt_svd, reduction="none").mean(dim=[1, 2, 3])  # [B]
+    mse_dct_p = F.mse_loss(recon_dct, tgt_dct, reduction="none").mean(dim=[1, 2, 3])  # [B]
+    mse_rgb_p = F.mse_loss(recon_rgb, tgt_rgb, reduction="none").mean(dim=[1, 2, 3])  # [B]
 
-    l1_svd = F.l1_loss(recon_svd, tgt_svd)
-    l1_dct = F.l1_loss(recon_dct, tgt_dct)
-    l1_rgb = F.l1_loss(recon_rgb, tgt_rgb)
-    l1_total = l1_svd + l1_dct + l1_rgb
+    l1_svd_p = F.l1_loss(recon_svd, tgt_svd, reduction="none").mean(dim=[1, 2, 3])
+    l1_dct_p = F.l1_loss(recon_dct, tgt_dct, reduction="none").mean(dim=[1, 2, 3])
+    l1_rgb_p = F.l1_loss(recon_rgb, tgt_rgb, reduction="none").mean(dim=[1, 2, 3])
+
+    # α-weighted aggregation — alpha is [B, 3] with columns [svd, dct, rgb]
+    mse_weighted = (
+        alpha[:, 0] * mse_svd_p
+        + alpha[:, 1] * mse_dct_p
+        + alpha[:, 2] * mse_rgb_p
+    ).mean()
+
+    l1_weighted = (
+        alpha[:, 0] * l1_svd_p
+        + alpha[:, 1] * l1_dct_p
+        + alpha[:, 2] * l1_rgb_p
+    ).mean()
 
     kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return mse_total + beta_kl * kl + beta_l1 * l1_total
+    # Diversity penalty: encourage batch-averaged alpha to stay roughly uniform.
+    # H(uniform) = log(3) ≈ 1.099. Penalty = log(3) - H(batch_avg_alpha) ≥ 0,
+    # zero when batch-avg alpha is uniform, positive when it concentrates on
+    # any subset of modalities. Per-sample alpha is unconstrained.
+    batch_avg_alpha = alpha.mean(dim=0)                                # [3]
+    batch_entropy = -(batch_avg_alpha * torch.log(batch_avg_alpha + 1e-9)).sum()
+    max_entropy = torch.log(torch.tensor(3.0, device=alpha.device))
+    diversity_penalty = max_entropy - batch_entropy
+
+    return mse_weighted + beta_kl * kl + beta_l1 * l1_weighted + gate_diversity_weight * diversity_penalty
