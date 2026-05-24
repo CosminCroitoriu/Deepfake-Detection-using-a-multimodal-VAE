@@ -42,7 +42,7 @@ def main():
     )
     parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data/ffpp"))
     parser.add_argument("--ckpt_dir", default=str(SCRIPT_DIR / "../../checkpoints/ffpp_svd_vae"))
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -50,6 +50,8 @@ def main():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume", default=None)
+    parser.add_argument("--save_every_epoch", action="store_true",
+                        help="Save a checkpoint every epoch as epoch_NNN.pth (for AUC search)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -106,6 +108,9 @@ def main():
         }
 
         torch.save(state, ckpt_dir / "latest.pth")
+
+        if args.save_every_epoch:
+            torch.save(state, ckpt_dir / f"epoch_{epoch+1:03d}.pth")
 
         if val_loss < best_val:
             best_val = val_loss

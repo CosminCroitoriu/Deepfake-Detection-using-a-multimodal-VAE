@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=2:00:00
 
 set -e
 
@@ -32,12 +32,13 @@ if [ -f "$CKPT" ]; then
 fi
 
 python -m detection.ffpp_svd_vae.train \
-    --epochs 100 \
+    --epochs 15 \
     --batch 32 \
     --lr 1e-3 \
     --weight_decay 1e-4 \
     --latent_dim 256 \
     --num_workers 8 \
+    --save_every_epoch \
     $RESUME_FLAG
 
 echo ""
