@@ -33,7 +33,7 @@ fi
 
 python -m detection.gated_vae.train \
     --epochs 100 \
-    --batch 16 \
+    --batch 32 \
     --lr 1e-3 \
     --weight_decay 1e-4 \
     --latent_dim 256 \

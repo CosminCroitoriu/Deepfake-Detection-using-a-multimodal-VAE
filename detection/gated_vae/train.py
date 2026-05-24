@@ -19,14 +19,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def run_epoch(model, loader, optimizer, device, training: bool):
+    """Run one epoch. Returns (avg_loss, mean_alpha_svd, mean_alpha_dct, mean_alpha_rgb)."""
     model.train(training)
     total_loss = 0.0
     total_n = 0
+    alpha_sum = torch.zeros(3, device=device)
     with torch.set_grad_enabled(training):
         for input_5ch, target_5ch in loader:
             input_5ch = input_5ch.to(device)
             target_5ch = target_5ch.to(device)
-            recon_svd, recon_dct, recon_rgb, mu, logvar, _alpha = model(input_5ch)
+            recon_svd, recon_dct, recon_rgb, mu, logvar, alpha = model(input_5ch)
             loss = gated_vae_loss(recon_svd, recon_dct, recon_rgb,
                                   target_5ch, mu, logvar)
             if training:
@@ -35,7 +37,10 @@ def run_epoch(model, loader, optimizer, device, training: bool):
                 optimizer.step()
             total_loss += loss.item() * input_5ch.size(0)
             total_n += input_5ch.size(0)
-    return total_loss / max(total_n, 1)
+            alpha_sum += alpha.detach().sum(dim=0)
+    avg_loss = total_loss / max(total_n, 1)
+    mean_alpha = (alpha_sum / max(total_n, 1)).cpu().tolist()
+    return avg_loss, mean_alpha
 
 
 def main():
@@ -45,7 +50,7 @@ def main():
     parser.add_argument("--data_dir", default=str(SCRIPT_DIR / "../../data"))
     parser.add_argument("--ckpt_dir", default=str(SCRIPT_DIR / "../../checkpoints/gated_vae"))
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--latent_dim", type=int, default=256)
@@ -93,12 +98,21 @@ def main():
     print(f"Device: {device}  |  Batch: {args.batch}  |  LR: {args.lr}  |  WD: {args.weight_decay}")
 
     for epoch in range(start_epoch, args.epochs):
-        train_loss = run_epoch(model, train_loader, optimizer, device, training=True)
-        val_loss = run_epoch(model, val_loader, optimizer, device, training=False)
+        train_loss, alpha_train = run_epoch(model, train_loader, optimizer, device, training=True)
+        val_loss, alpha_val = run_epoch(model, val_loader, optimizer, device, training=False)
         scheduler.step()
 
-        history.append({"epoch": epoch, "train": train_loss, "val": val_loss})
-        print(f"Epoch {epoch+1:3d}/{args.epochs}  train={train_loss:.5f}  val={val_loss:.5f}")
+        history.append({
+            "epoch": epoch,
+            "train": train_loss, "val": val_loss,
+            "alpha_train": alpha_train, "alpha_val": alpha_val,
+        })
+        a_svd, a_dct, a_rgb = alpha_train
+        print(
+            f"Epoch {epoch+1:3d}/{args.epochs}  "
+            f"train={train_loss:.5f}  val={val_loss:.5f}  "
+            f"α=[svd={a_svd:.3f} dct={a_dct:.3f} rgb={a_rgb:.3f}]"
+        )
 
         state = {
             "epoch": epoch,
