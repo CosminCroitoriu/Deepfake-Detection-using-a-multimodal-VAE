@@ -1,15 +1,21 @@
 # Core
-torch>=2.1.0
-torchvision>=0.16.0
+# torch is held on the 2.2.x line: the cloned projected_gan repo is patched for
+# it and the detection/VAE code is tested on it. The HF stack below is capped to
+# releases compatible with this torch (newer diffusers/transformers assume torch
+# 2.4+ and reference torch.xpu, which does not exist before 2.4).
+torch>=2.1.0,<2.3.0
+torchvision>=0.16.0,<0.18.0
 Pillow>=10.0.0
 tqdm>=4.65.0
 numpy>=1.24.0
 
-# Diffusion models (SD v1.5, SDXL) + VLMs (LLaVA, InstructBLIP)
-diffusers>=0.28.0
-transformers>=4.38.0
-accelerate>=0.27.0
-peft>=0.9.0
+# Diffusion models (SD v1.5, SD3) + VLMs (LLaVA, InstructBLIP)
+# Upper bounds matter: diffusers >=0.31 eagerly evaluates torch.xpu at import and
+# crashes on torch 2.2.x. The pinned set still supports StableDiffusion3Pipeline.
+diffusers>=0.29.0,<0.31.0
+transformers>=4.38.0,<4.45.0
+accelerate>=0.27.0,<0.34.0
+peft>=0.9.0,<0.13.0
 safetensors>=0.4.0
 sentencepiece>=0.1.99
 
